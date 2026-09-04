@@ -15,6 +15,7 @@ from .comparison import (
     inspect_efd_file,
 )
 from .converter import COLUMNS, SUPPORTED_OUTPUTS, ConversionResult, convert_file
+from .identifiers import cnpj_root
 from .indicators import IndicatorResult, generate_indicator_csv
 from .scope import ScopeMonth, build_scope, month_from_efd_period, validate_period_in_scope
 
@@ -108,13 +109,16 @@ def discover_annual_efd_input(input_directory: str | Path) -> AnnualEFDInventory
     all_files = [item for values in discovered.values() for item in values]
     years = sorted({month.year for month, _, _ in all_files})
     cnpjs = sorted({cnpj for _, _, cnpj in all_files})
+    cnpj_roots = sorted({cnpj_root(cnpj) for cnpj in cnpjs})
     if len(years) > 1:
         issues.append(
             "foram encontrados arquivos de mais de um ano: "
             + ", ".join(str(year) for year in years)
         )
-    if len(cnpjs) > 1:
-        issues.append("foram encontrados CNPJs diferentes: " + ", ".join(cnpjs))
+    if len(cnpj_roots) > 1:
+        issues.append(
+            "foram encontrados CNPJs de raízes diferentes: " + ", ".join(cnpjs)
+        )
 
     indexed: dict[str, dict[ScopeMonth, Path]] = {source: {} for source in folders}
     for source, values in discovered.items():
@@ -143,7 +147,7 @@ def discover_annual_efd_input(input_directory: str | Path) -> AnnualEFDInventory
     return AnnualEFDInventory(
         root,
         year,
-        cnpjs[0],
+        discovered["contribution"][0][2] if discovered["contribution"] else cnpjs[0],
         contributions,
         icms,
         tuple(month for month in expected if month not in contributions),

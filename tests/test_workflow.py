@@ -95,6 +95,21 @@ def test_discovers_and_processes_available_periods_for_the_whole_year(
     }
 
 
+def test_accepts_matrix_and_branch_with_the_same_cnpj_root(tmp_path: Path) -> None:
+    input_directory = create_annual_input(tmp_path / "entrada")
+    icms_path = input_directory / "efd_icms" / "efd_08_2026.txt"
+    content = icms_path.read_text(encoding="utf-8").replace(
+        "99999999000199", "99999999000270", 1
+    )
+    icms_path.write_text(content, encoding="utf-8")
+
+    inventory = discover_annual_efd_input(input_directory)
+
+    assert inventory.cnpj == "99999999000199"
+    assert len(inventory.contributions) == 1
+    assert len(inventory.icms) == 1
+
+
 def test_main_reports_missing_months_and_cancels_before_writing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -184,5 +199,5 @@ def test_reports_year_cnpj_and_duplicate_period_inconsistencies(
 
     message = str(captured.value)
     assert "mais de um ano" in message
-    assert "CNPJs diferentes" in message
+    assert "CNPJs de raízes diferentes" in message
     assert "duplicada em 08/2026" in message

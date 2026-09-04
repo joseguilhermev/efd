@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .identifiers import cnpj_root
+
 COMPARISON_COLUMNS = (
     "Status",
     "Identificador",
@@ -100,11 +102,12 @@ class FiscalNote:
 
     @property
     def identity(self) -> str:
+        company = cnpj_root(self.cnpj)
         if self.key:
-            return f"{self.cnpj}|CHV_NFE|{self.key}"
+            return f"{company}|CHV_NFE|{self.key}"
         participant = self.participant_tax_id or self.participant
         return (
-            f"{self.cnpj}|DOC|{participant}|{self.model}|{self.series}|{self.number}"
+            f"{company}|DOC|{participant}|{self.model}|{self.series}|{self.number}"
         )
 
     @property
@@ -441,11 +444,14 @@ def compare_efd_files(
     all_contribution_notes = _notes(contribution_data, source="contribution")
     icms_notes = _notes(icms_data, source="icms")
     contribution_notes = [
-        note for note in all_contribution_notes if note.cnpj == icms_data.cnpj
+        note
+        for note in all_contribution_notes
+        if cnpj_root(note.cnpj) == cnpj_root(icms_data.cnpj)
     ]
     if all_contribution_notes and not contribution_notes:
         raise EFDComparisonError(
-            "o CNPJ da EFD ICMS/IPI não possui notas C100 na EFD Contribuições"
+            "a raiz do CNPJ da EFD ICMS/IPI não possui notas C100 "
+            "na EFD Contribuições"
         )
 
     contribution_index = _index(contribution_notes)

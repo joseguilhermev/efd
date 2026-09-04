@@ -144,6 +144,28 @@ def test_compares_distinct_invoices_and_reports_duplicates(tmp_path: Path) -> No
     assert by_key[keys["E"]]["Quantidade EFD Contribuições"] == "2"
 
 
+def test_compares_matrix_and_branch_with_the_same_cnpj_root(tmp_path: Path) -> None:
+    contribution = tmp_path / "contribution.txt"
+    icms = tmp_path / "icms.txt"
+    output = tmp_path / "comparison.csv"
+    key = "1" * 44
+    contribution.write_text(
+        contribution_header("12345678000270")
+        + c100_line("1", key, "100,00"),
+        encoding="ascii",
+    )
+    icms.write_text(
+        icms_header("12345678000199") + c100_line("1", key, "100,00"),
+        encoding="ascii",
+    )
+
+    result = compare_efd_files(contribution, icms, output)
+
+    assert result.contribution_notes == 1
+    assert result.icms_notes == 1
+    assert result.by_status["CONFERENTE"] == 1
+
+
 def test_matches_non_electronic_invoice_without_key(tmp_path: Path) -> None:
     contribution = tmp_path / "contribution.txt"
     icms = tmp_path / "icms.txt"

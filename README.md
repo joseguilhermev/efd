@@ -55,8 +55,9 @@ entrada/
 ```
 
 Os nomes dos arquivos são livres. O período, o tipo da EFD e o CNPJ são lidos
-do conteúdo. Todos os arquivos devem pertencer ao mesmo CNPJ e ao mesmo ano, e
-só pode existir um arquivo de cada EFD por mês.
+do conteúdo. Todos os arquivos devem pertencer à mesma raiz de CNPJ (as oito
+primeiras posições) e ao mesmo ano, permitindo combinar matriz e filiais. Só
+pode existir um arquivo de cada EFD por mês.
 
 Na pasta do projeto, execute todo o fluxo por uma única entrada:
 
@@ -86,9 +87,9 @@ CSVs. Em execução automatizada, a confirmação pode ser dispensada:
 uv run efd-processar entrada --continuar-com-ausentes
 ```
 
-Ano divergente, CNPJ divergente, período duplicado, pasta ausente, tipo de EFD
-incorreto ou arquivo inválido impedem o processamento e são apresentados antes
-da geração das saídas. Quando a continuação com meses ausentes é autorizada,
+Ano divergente, raiz de CNPJ divergente, período duplicado, pasta ausente, tipo
+de EFD incorreto ou arquivo inválido impedem o processamento e são apresentados
+antes da geração das saídas. Quando a continuação com meses ausentes é autorizada,
 somente os períodos disponíveis são consolidados e somente os meses que possuem
 as duas EFDs são comparados.
 
@@ -132,11 +133,11 @@ fictícios.
 
 O fluxo compara uma nota por registro `C100`, sem repetir os itens `C170`:
 
-Para NF-e e NFC-e, a identificação usa `CNPJ do estabelecimento + CHV_NFE`.
-Nos modelos sem chave eletrônica, usa `CNPJ do estabelecimento + documento do
-participante + modelo + série + número`. Quando a EFD Contribuições contém
-vários estabelecimentos, são comparadas somente as notas do CNPJ informado no
-registro `0000` da EFD ICMS/IPI.
+Para NF-e e NFC-e, a identificação usa `raiz do CNPJ + CHV_NFE`. Nos modelos
+sem chave eletrônica, usa `raiz do CNPJ + documento do participante + modelo +
+série + número`. Quando a EFD Contribuições contém vários estabelecimentos, são
+comparadas as notas cuja raiz de CNPJ corresponda à informada no registro
+`0000` da EFD ICMS/IPI.
 
 O CSV informa os valores das duas escriturações lado a lado e atribui um dos
 seguintes status:
