@@ -1,0 +1,23 @@
+[project]
+name = "efd-contribuicoes-csv"
+version = "0.1.0"
+description = "Converte EFD Contribuicoes em CSV analitico por documento e item"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+efd-processar = "efd_contribuicoes_csv.workflow_cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
