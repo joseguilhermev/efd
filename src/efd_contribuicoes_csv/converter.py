@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cfop import cfop_details
+from .scope import month_from_efd_period
 
 COLUMNS = (
     "CNPJ",
@@ -785,6 +786,10 @@ def _validate_contribution_file(records: list[Record], master: MasterData) -> No
         raise EFDParseError("CNPJ não encontrado no registro 0000")
     if not master.period:
         raise EFDParseError("período não encontrado no registro 0000")
+    try:
+        month_from_efd_period(master.period)
+    except ValueError as exc:
+        raise EFDParseError(str(exc)) from exc
 
 
 def _is_date(value: str) -> bool:
@@ -1266,6 +1271,16 @@ def _split_tax_rows(
         if pis is not None:
             _copy_fields(row, pis, spec.pis_fields)
         if cofins is not None:
+            # Os campos que identificam o par também existem no detalhe de Cofins.
+            _copy_fields(
+                row,
+                cofins,
+                {
+                    column: position
+                    for column, position in spec.pis_fields.items()
+                    if position in spec.key_positions
+                },
+            )
             _copy_fields(row, cofins, spec.cofins_fields)
         detail = pis or cofins
         if detail is not None and spec.item_position is not None:

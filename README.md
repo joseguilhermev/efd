@@ -6,7 +6,7 @@ colunas da imagem fornecida, separador `;` e codificação UTF-8 com BOM, adequa
 para abertura no Excel.
 
 O fluxo integrado recebe também a EFD ICMS/IPI, controla o período de escopo e
-destaca as notas que não foram lançadas na EFD Contribuições. O preenchimento de
+destaca documentos não localizados na EFD Contribuições e casos que exigem revisão. O preenchimento de
 um WP em Excel não faz parte desta etapa.
 
 O conversor suporta:
@@ -57,7 +57,8 @@ entrada/
 Os nomes dos arquivos são livres. O período, o tipo da EFD e o CNPJ são lidos
 do conteúdo. Todos os arquivos devem pertencer à mesma raiz de CNPJ (as oito
 primeiras posições) e ao mesmo ano, permitindo combinar matriz e filiais. Só
-pode existir um arquivo de cada EFD por mês.
+pode existir um arquivo de cada EFD por mês. Uma subpasta pode estar vazia,
+mas deve existir pelo menos uma EFD válida na entrada.
 
 Na pasta do projeto, execute todo o fluxo por uma única entrada:
 
@@ -90,8 +91,13 @@ uv run efd-processar entrada --continuar-com-ausentes
 Ano divergente, raiz de CNPJ divergente, período duplicado, pasta ausente, tipo
 de EFD incorreto ou arquivo inválido impedem o processamento e são apresentados
 antes da geração das saídas. Quando a continuação com meses ausentes é autorizada,
-somente os períodos disponíveis são consolidados e somente os meses que possuem
-as duas EFDs são comparados.
+todos os períodos disponíveis são processados. Meses sem uma das EFDs mantêm
+os documentos disponíveis como pendências, sem concluir que as notas estão ausentes.
+
+As datas inicial e final devem ser válidas, estar em ordem e pertencer ao mesmo
+mês. Os fluxos integrado e anual geram os relatórios em uma pasta temporária;
+erros durante a conversão, comparação ou criação do Excel preservam as saídas
+anteriores. A substituição dos arquivos começa somente após concluir essa geração.
 
 O fluxo cria:
 
@@ -99,9 +105,15 @@ O fluxo cria:
 - `efd_contribuicoes_indicadores.csv`;
 - `efd_comparacao_notas.csv`;
 - `efd_icms_nao_lancadas_contribuicoes.csv`;
+- `efd_pendencias_conferencia.csv`;
+- `efd_cobertura_registros.csv`;
 - `efd_periodos_escopo.csv`;
 - `efd_resultado.xlsx`, com as abas `Analítico`, `Indicadores`, `Comparação`,
-  `Não lançadas` e `Períodos`.
+  `Não lançadas`, `Pendências`, `Cobertura` e `Períodos`.
+
+A saída de notas não lançadas também inclui notas duplicadas no ICMS quando
+não existe correspondência nem evidência alternativa compatível nas Contribuições,
+preservando o status de duplicidade e as quantidades de cada escrituração.
 
 Os CSVs continuam disponíveis para integrações. Para uso direto no Excel, abra
 o arquivo `.xlsx`: CNPJ, CPF, chaves, números de documento e demais códigos são
@@ -137,36 +149,114 @@ A fixture `tests/fixtures/efd_contribuicoes_outros_pares.txt` contém uma
 operação mínima de cada agrupamento pai/filho adicional, com dados inteiramente
 fictícios.
 
-## Comparação de notas com a EFD ICMS/IPI
+## Comparação documental com a EFD ICMS/IPI
 
-O fluxo compara uma nota por registro `C100`, sem repetir os itens `C170`:
+A conferência lê os documentos diretamente dos TXT, independentemente de terem
+itens no CSV analítico. Os filtros de CFOP dos indicadores não retiram documentos
+da comparação. São preservadas operações de entrada e saída e a situação fiscal,
+inclusive cancelamentos.
 
-Para NF-e e NFC-e, a identificação usa `raiz do CNPJ + CHV_NFE`. Nos modelos
-sem chave eletrônica, usa `raiz do CNPJ + documento do participante + modelo +
-série + número`. Quando a EFD Contribuições contém vários estabelecimentos, são
-comparadas as notas cuja raiz de CNPJ corresponda à informada no registro
-`0000` da EFD ICMS/IPI.
+| Documentos identificados no ICMS | Registros |
+| --- | --- |
+| Notas de mercadorias, NF-e e NFC-e | C100 |
+| Notas de serviços do bloco B | B020 |
+| Notas de venda a consumidor e cupons ECF | C350, C460 e complemento de chave C465 |
+| Energia, água e gás, incluindo NF3e | C500 |
+| Cupons SAT | C800 |
+| Documentos de transporte | D100 |
+| Comunicação e telecomunicação | D500 e D700 (NFCom) |
+| Números cancelados informados nos resumos | C310, C601, D301 e D411, com identificação do registro pai |
 
-O CSV informa os valores das duas escriturações lado a lado e atribui um dos
-seguintes status:
+Nas Contribuições, são procurados os documentos individuais A100, C100, C395,
+C500, C800, D100 e D500. A correspondência pode ocorrer entre registros diferentes:
+por exemplo, uma NF-e de energia no C100 do ICMS pode estar no C500 das
+Contribuições. Não se presume que todo modelo tenha um equivalente individual.
 
-- `CONFERENTE`: os campos comparados são iguais;
-- `DIVERGENTE`: operação, emitente, modelo, situação, série, número, datas ou
-  valor do documento são diferentes;
-- `SOMENTE_EFD_CONTRIBUICOES` ou `SOMENTE_EFD_ICMS`: a nota existe em apenas um
-  arquivo;
-- `DUPLICADA_EFD_CONTRIBUICOES`, `DUPLICADA_EFD_ICMS` ou `DUPLICADA_AMBAS`: a
-  chave documental aparece mais de uma vez no mesmo arquivo.
+A identificação prioriza a chave eletrônica e a raiz do CNPJ. Chaves de NFS-e
+são separadas das chaves de mercadorias. Na falta de chave em um dos lados, só
+há associação quando a identificação documental é única: emitente, participante,
+modelo/família, série, subsérie, número, ano da emissão e equipamento, quando
+aplicável. Códigos locais de participantes não substituem CNPJ/CPF. Os cadastros
+0150 das Contribuições respeitam o estabelecimento do 0140. Zeros à esquerda
+são normalizados apenas na comparação de série e número; a saída mantém o original.
 
-O comparador aceita o `C100` oficial de 29 campos e a variante compacta de 28
-campos apenas na EFD Contribuições sintética fornecida. Na EFD ICMS/IPI são
-exigidos os 29 campos oficiais e chaves eletrônicas com 44 dígitos. Arquivos de
-períodos diferentes são rejeitados para evitar uma comparação enganosa.
+Na execução anual, uma chave eletrônica não encontrada no mês é procurada nos
+outros meses fornecidos do ano. Se encontrada, a presença é confirmada e o caso
+vai para Pendências para revisar a competência e os valores. A comparação avulsa
+entre dois arquivos continua exigindo o mesmo período. Documentos sem chave não
+são associados automaticamente entre meses.
 
-O arquivo `efd_icms_sintetico_estrutura_real.txt` é uma massa de teste focada
-nos registros `0000`, `0150`, `C100`, `C190` e nos encerramentos dos blocos. Ele
-usa a estrutura de campos vigente, mas contém inscrições e valores fictícios e
-não deve ser transmitido nem tratado como arquivo homologado pelo PVA.
+### Como interpretar as saídas
+
+A coluna **Presença EFD Contribuições** separa a localização do documento da
+conferência de valores:
+
+- `PRESENTE`: existe correspondência identificável, mesmo que haja divergência,
+  duplicidade ou escrituração em outro período;
+- `NAO_LOCALIZADA`: documento individual do ICMS sem correspondência nem evidência
+  alternativa compatível nas formas de escrituração verificadas;
+- `INCONCLUSIVA`: consolidação, dados insuficientes, identificação ambígua ou
+  registro não mapeado impedem concluir;
+- `SEM_ARQUIVO`: a EFD Contribuições correspondente não foi fornecida e a busca
+  anual não encontrou uma chave em outro período.
+
+Os status `CONFERENTE`, `DIVERGENTE`, `SOMENTE_EFD_CONTRIBUICOES`,
+`SOMENTE_EFD_ICMS` e os três status de duplicidade continuam disponíveis.
+`CONFERENTE` significa igualdade dos campos comuns aos dois leiautes, não
+validação integral da nota. Há também `REVISAO_NECESSARIA`,
+`SEM_EFD_CONTRIBUICOES` e `SEM_EFD_ICMS`.
+
+Use as abas nesta ordem:
+
+1. **Não lançadas**: documentos individuais classificados como `NAO_LOCALIZADA`,
+   inclusive duplicados no ICMS. A situação fiscal e as quantidades são mantidas.
+2. **Pendências**: casos sem conclusão automática, com motivo, arquivo, registro,
+   linhas e evidências para conferência, além das chaves encontradas em outro mês.
+3. **Cobertura**: registros encontrados em cada arquivo, quantidade, primeira
+   linha e tratamento — documento individual, sem identificação individual,
+   auxiliar ou não mapeado.
+
+A coluna histórica `Chave NF-e` também contém as chaves dos demais documentos
+eletrônicos; o modelo e o registro indicam o tipo.
+`Chave EFD Contribuições` e `Chave EFD ICMS` preservam separadamente o que foi
+informado em cada arquivo. `Quantidade EFD ICMS` e
+`Quantidade EFD Contribuições` contam ocorrências da evidência daquela linha.
+Linhas de resumo não representam uma nota individual e seus valores não devem
+ser somados aos documentos detalhados como se fossem operações adicionais.
+
+### Consolidações e limites da conferência
+
+São sinalizados os resumos do ICMS B030/B350, C300/C405/C495/C600/C700/C860,
+D300/D355/D400/D410/D600/D695/D750. Faixas de números não são expandidas em
+notas fictícias. C465 complementa C460; itens, apurações e documentos apenas
+referenciados, como C113 e D162, não são contados como outra nota.
+
+Nas Contribuições, C180/C190/C380/C405/C490/C600/C860,
+D200/D300/D350/D600 e F500/F510/F550/F560 podem impedir uma conclusão por nota.
+F100 também é tratado como evidência sem identidade fiscal padronizada.
+A compatibilidade considera estabelecimento, modelo, operação, datas, série,
+equipamento e faixa numérica quando disponíveis. Ela gera uma pendência; não
+comprova que uma nota específica integra o total. Campos ausentes tornam a
+avaliação mais conservadora.
+
+Códigos não mapeados nos blocos documentais são expostos em Cobertura e
+Pendências; não desaparecem silenciosamente. Leiautes de documentos conhecidos
+com quantidade de campos incompatível interrompem o processamento. A amostra
+compacta original continua aceita para A100 e C100 das Contribuições.
+
+**Não localizado não significa omissão fiscal comprovada.** A obrigatoriedade
+de escriturar uma operação nas Contribuições depende de seu tratamento fiscal.
+A conferência não substitui o PVA nem determina direito a crédito ou tributo devido.
+Quando o TXT contém somente resumos, a validação individual exige documentos
+adicionais, como XML ou relatórios do sistema de origem; estes não são importados
+nesta versão. A ampliação documental não altera o escopo do conversor analítico
+nem as regras dos indicadores descritas abaixo.
+
+O arquivo `efd_icms_sintetico_estrutura_real.txt` é uma massa fictícia focada
+em C100 e C190, não homologada pelo PVA. Nessa amostra, a chave exclusiva do
+ICMS exige revisão por haver F550 compatível; ela não é tratada automaticamente
+como não lançada. Os testes em `tests/test_document_scope.py` exercitam os
+registros adicionais e as situações de cobertura.
 
 ## Regras relevantes
 
@@ -190,7 +280,9 @@ não deve ser transmitido nem tratado como arquivo homologado pelo PVA.
 - `A100` ou `C100` sem o respectivo item `A170` ou `C170` não gera linha no CSV;
   isso evita misturar documentos cancelados ou detalhados por registros fora do
   escopo com a tabela analítica por item.
-- Registros diferentes dos grupos operacionais definidos no escopo são ignorados.
+- No conversor analítico, registros fora dos grupos operacionais definidos são
+  ignorados. Na conferência documental, registros desconhecidos nos blocos
+  documentais são explicitados como pendências.
 - No F550, `VL_REC_COMP` alimenta apenas `Vlr Mercadoria/Operação`; os descontos
   específicos de PIS e Cofins não são tratados como desconto de item.
 
@@ -234,3 +326,8 @@ SEF/SC](https://www.sef.sc.gov.br/orientacoes/codigos-fiscais-de-operacoes-e-pre
 A estrutura da massa ICMS e as regras do `C100` foram baseadas no [Guia Prático
 da EFD ICMS/IPI v3.2.2](https://www.gov.br/sped/pt-br/assuntos/escrituracoes-digitais/efd-icms-ipi/manuais-e-documentos-tecnicos/guia-pratico-da-efd-icms-ipi-3-2.2),
 vigente a partir de 2026.
+
+O mapa da comparação ampliada foi conferido no [Guia Prático EFD ICMS/IPI
+v3.2.3](https://www.gov.br/sped/pt-br/assuntos/escrituracoes-digitais/efd-icms-ipi/guia%20pratico)
+e no Guia da EFD Contribuições v1.35 citado acima. As posições e os códigos
+auxiliares estão concentrados em `src/efd_contribuicoes_csv/document_layouts.py`.

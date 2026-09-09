@@ -134,6 +134,9 @@ def test_compares_distinct_invoices_and_reports_duplicates(tmp_path: Path) -> No
         "DUPLICADA_EFD_CONTRIBUICOES": 1,
         "DUPLICADA_EFD_ICMS": 0,
         "DUPLICADA_AMBAS": 0,
+        "REVISAO_NECESSARIA": 0,
+        "SEM_EFD_CONTRIBUICOES": 0,
+        "SEM_EFD_ICMS": 0,
     }
     assert by_key[keys["A"]]["Status"] == "CONFERENTE"
     assert by_key[keys["B"]]["Status"] == "DIVERGENTE"
@@ -253,13 +256,35 @@ def test_generates_real_c100_shape_and_compares_sample(
     assert set(c190_lengths) == {12}
     assert exit_code == 0
     assert "Comparação criada:" in message
-    assert result.rows == 121
+    assert result.rows == 221
     assert result.by_status == {
         "CONFERENTE": 117,
         "DIVERGENTE": 1,
-        "SOMENTE_EFD_CONTRIBUICOES": 2,
-        "SOMENTE_EFD_ICMS": 1,
+        "SOMENTE_EFD_CONTRIBUICOES": 102,
+        "SOMENTE_EFD_ICMS": 0,
         "DUPLICADA_EFD_CONTRIBUICOES": 0,
         "DUPLICADA_EFD_ICMS": 0,
         "DUPLICADA_AMBAS": 0,
+        "REVISAO_NECESSARIA": 1,
+        "SEM_EFD_CONTRIBUICOES": 0,
+        "SEM_EFD_ICMS": 0,
     }
+
+
+def test_rejects_invalid_end_date_before_comparing(tmp_path: Path) -> None:
+    contribution = tmp_path / "contribution.txt"
+    icms = tmp_path / "icms.txt"
+    output = tmp_path / "comparison.csv"
+    contribution.write_text(contribution_header().replace("31082026", "31022026"))
+    icms.write_text(icms_header().replace("31082026", "31022026"))
+    with pytest.raises(EFDComparisonError, match="período da EFD inválido"):
+        compare_efd_files(contribution, icms, output)
+    assert not output.exists()
+
+
+def test_identifies_contributions_with_only_transport_block(tmp_path: Path) -> None:
+    from efd_contribuicoes_csv.comparison import inspect_efd_file
+
+    source = tmp_path / "transport.txt"
+    source.write_text(contribution_header().replace("C010", "D010"))
+    assert inspect_efd_file(source, source="contribution").cnpj == "12345678000199"

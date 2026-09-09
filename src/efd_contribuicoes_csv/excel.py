@@ -15,6 +15,8 @@ SHEETS = (
     ("Indicadores", "efd_contribuicoes_indicadores.csv"),
     ("Comparação", "efd_comparacao_notas.csv"),
     ("Não lançadas", "efd_icms_nao_lancadas_contribuicoes.csv"),
+    ("Pendências", "efd_pendencias_conferencia.csv"),
+    ("Cobertura", "efd_cobertura_registros.csv"),
     ("Períodos", "efd_periodos_escopo.csv"),
 )
 
@@ -29,6 +31,7 @@ INTEGER_COLUMNS = {
     "Quantidade Registros",
     "Quantidade EFD Contribuições",
     "Quantidade EFD ICMS",
+    "Primeira Linha",
 }
 DATE_COLUMN_PREFIXES = ("Data Documento", "Data Entrada/Saída")
 
@@ -51,10 +54,12 @@ def _typed_value(column: str, value: str) -> object:
     if not value:
         return None
     if column.startswith(DATE_COLUMN_PREFIXES):
-        try:
-            return datetime.strptime(value, "%d/%m/%Y").date()
-        except ValueError:
-            return value
+        for date_format in ("%d/%m/%Y", "%d%m%Y"):
+            try:
+                return datetime.strptime(value, date_format).date()
+            except ValueError:
+                continue
+        return value
     if column in INTEGER_COLUMNS:
         try:
             return int(value)
@@ -86,7 +91,7 @@ def create_excel_workbook(
     *,
     delimiter: str = ";",
 ) -> Path:
-    """Cria uma pasta de trabalho tipada a partir das cinco saídas CSV."""
+    """Cria uma pasta de trabalho tipada a partir das saídas CSV."""
 
     output = Path(output_directory)
     destination = Path(workbook_path)
@@ -117,6 +122,8 @@ def create_excel_workbook(
         for index, header in enumerate(headers, start=1):
             letter = get_column_letter(index)
             for cell in worksheet[letter][1:]:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
                 cell.number_format = _number_format(header)
             longest = max(
                 len(str(cell.value)) if cell.value is not None else 0

@@ -3,11 +3,12 @@ from __future__ import annotations
 import csv
 import tempfile
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .comparison import (
     COMPARISON_COLUMNS,
+    COVERAGE_COLUMNS,
     STATUSES,
     ComparisonResult,
     EFDComparisonError,
@@ -38,6 +39,9 @@ class WorkflowResult:
     missing_notes_path: Path
     missing_notes: int
     workbook_path: Path
+    pending_notes_path: Path
+    coverage_path: Path
+    pending_notes: int
 
 
 @dataclass(frozen=True)
@@ -96,9 +100,6 @@ def discover_annual_efd_input(input_directory: str | Path) -> AnnualEFDInventory
             issues.append(f"pasta obrigatória não encontrada: {directory}")
             continue
         files = _input_files(directory)
-        if not files:
-            issues.append(f"nenhum arquivo TXT encontrado em {directory}")
-            continue
         for path in files:
             try:
                 info = inspect_efd_file(path, source=source)
@@ -274,7 +275,9 @@ def _write_missing_notes_csv(
         rows = [
             row
             for row in csv.DictReader(stream, delimiter=delimiter)
-            if row["Status"] == "SOMENTE_EFD_ICMS"
+            if row["Presença EFD Contribuições"] == "NAO_LOCALIZADA"
+            and row["Tipo Evidência EFD ICMS"] == "DOCUMENTO"
+            and int(row["Quantidade EFD ICMS"]) > 0
         ]
     with output_path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
@@ -288,7 +291,135 @@ def _write_missing_notes_csv(
     return len(rows)
 
 
+def _write_review_reports(
+    comparison: ComparisonResult, output: Path, *, delimiter: str,
+) -> tuple[Path, Path, int]:
+    pending_path = output / "efd_pendencias_conferencia.csv"
+    coverage_path = output / "efd_cobertura_registros.csv"
+    with comparison.output_path.open(encoding="utf-8-sig", newline="") as stream:
+        pending = [row for row in csv.DictReader(stream, delimiter=delimiter) if row["Motivo da Revisão"]]
+    for path, columns, rows in (
+        (pending_path, COMPARISON_COLUMNS, pending),
+        (coverage_path, COVERAGE_COLUMNS, comparison.coverage),
+    ):
+        with path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=columns, delimiter=delimiter, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+    return pending_path, coverage_path, len(pending)
+
+
+def _reconcile_other_periods(path: Path, *, delimiter: str) -> tuple[int, Counter[str]]:
+    """Procura chaves eletrônicas nos outros meses fornecidos do mesmo ano."""
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter=delimiter))
+    by_key: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        key = row["Chave EFD Contribuições"]
+        if (len(key) == 44 and key.isdecimal()
+                and row["Tipo Evidência EFD Contribuições"] == "DOCUMENTO"
+                and not row["Registros EFD Contribuições"].startswith("A")):
+            by_key.setdefault(key, []).append(row)
+    consumed: set[int] = set()
+    for row in rows:
+        if row["Tipo Evidência EFD ICMS"] != "DOCUMENTO" or row["Quantidade EFD Contribuições"] != "0":
+            continue
+        if row["Registros EFD ICMS"] == "B020" and row["Modelo EFD ICMS"] == "03":
+            continue
+        candidates = [candidate for candidate in by_key.get(row["Chave EFD ICMS"], [])
+                      if candidate["Período EFD Contribuições"] != row["Período EFD ICMS"]]
+        if not candidates:
+            continue
+        if len(candidates) == 1:
+            for column in COMPARISON_COLUMNS:
+                if column.endswith(" EFD Contribuições"):
+                    row[column] = candidates[0][column]
+            consumed.add(id(candidates[0]))
+        else:
+            row["Quantidade EFD Contribuições"] = str(sum(int(item["Quantidade EFD Contribuições"]) for item in candidates))
+            row["Tipo Evidência EFD Contribuições"] = "DOCUMENTO"
+        row["Status"] = "REVISAO_NECESSARIA"
+        row["Presença EFD Contribuições"] = "PRESENTE"
+        row["Critério de Conferência"] = "CHAVE EM OUTRO PERÍODO"
+        row["Motivo da Revisão"] = (
+            "Chave localizada em outro período; revisar a competência e os valores."
+            if len(candidates) == 1 else
+            "Chave localizada em vários períodos das Contribuições; revisar duplicidade e competência."
+        )
+        row["Divergências"] = "Período de escrituração"
+        row["Evidências EFD Contribuições"] = "; ".join(
+            f"{item['Arquivo EFD Contribuições']} ({item['Período EFD Contribuições']}), linhas {item['Linhas EFD Contribuições']}"
+            for item in candidates
+        )
+    rows = [row for row in rows if not (id(row) in consumed and row["Quantidade EFD ICMS"] == "0")]
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=COMPARISON_COLUMNS, delimiter=delimiter, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows), Counter(row["Status"] for row in rows)
+
+
 def process_efd_files(
+    contribution_path: str | Path,
+    icms_path: str | Path,
+    output_directory: str | Path,
+    *,
+    delimiter: str = ";",
+    cfop_include: set[str] | frozenset[str] = frozenset(),
+    cfop_exclude: set[str] | frozenset[str] = frozenset(),
+    period_start: str | None = None,
+    period_end: str | None = None,
+) -> WorkflowResult:
+    """Gera todas as saídas antes de substituir os relatórios anteriores."""
+
+    output = Path(output_directory).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="efd-fluxo-", dir=output.parent) as temporary:
+        result = _process_efd_files(
+            contribution_path, icms_path, temporary,
+            delimiter=delimiter,
+            cfop_include=cfop_include,
+            cfop_exclude=cfop_exclude,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        return _publish_result(result, output, (contribution_path, icms_path))
+
+
+def _publish_result(
+    result: WorkflowResult,
+    output_directory: str | Path,
+    input_paths: tuple[str | Path, ...],
+) -> WorkflowResult:
+    output = Path(output_directory).expanduser().resolve()
+    inputs = {Path(path).expanduser().resolve() for path in input_paths}
+    sources = list(result.output_directory.iterdir())
+    if any((output / source.name).resolve() in inputs for source in sources):
+        raise ValueError("os relatórios não podem sobrescrever um arquivo EFD")
+    output.mkdir(parents=True, exist_ok=True)
+    for source in sources:
+        source.replace(output / source.name)
+    return replace(
+        result,
+        output_directory=output,
+        conversion=replace(
+            result.conversion, output_path=output / result.conversion.output_path.name
+        ),
+        indicators=replace(
+            result.indicators, output_path=output / result.indicators.output_path.name
+        ),
+        comparison=replace(
+            result.comparison, output_path=output / result.comparison.output_path.name
+        ),
+        scope_path=output / result.scope_path.name,
+        missing_notes_path=output / result.missing_notes_path.name,
+        workbook_path=output / result.workbook_path.name,
+        pending_notes_path=output / result.pending_notes_path.name,
+        coverage_path=output / result.coverage_path.name,
+    )
+
+
+def _process_efd_files(
     contribution_path: str | Path,
     icms_path: str | Path,
     output_directory: str | Path,
@@ -351,6 +482,7 @@ def process_efd_files(
         missing_notes_path,
         delimiter=delimiter,
     )
+    pending_path, coverage_path, pending_count = _write_review_reports(comparison, output, delimiter=delimiter)
     create_excel_workbook(output, workbook_path, delimiter=delimiter)
     return WorkflowResult(
         output,
@@ -361,10 +493,38 @@ def process_efd_files(
         missing_notes_path,
         missing_notes,
         workbook_path,
+        pending_path,
+        coverage_path,
+        pending_count,
     )
 
 
 def process_annual_efd_input(
+    inventory: AnnualEFDInventory,
+    output_directory: str | Path,
+    *,
+    delimiter: str = ";",
+    cfop_include: set[str] | frozenset[str] = frozenset(),
+    cfop_exclude: set[str] | frozenset[str] = frozenset(),
+) -> WorkflowResult:
+    """Gera o resultado anual completo antes de substituir as saídas anteriores."""
+
+    output = Path(output_directory).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="efd-fluxo-anual-", dir=output.parent) as temporary:
+        result = _process_annual_efd_input(
+            inventory, temporary,
+            delimiter=delimiter,
+            cfop_include=cfop_include,
+            cfop_exclude=cfop_exclude,
+        )
+        return _publish_result(
+            result, output,
+            (*inventory.contributions.values(), *inventory.icms.values()),
+        )
+
+
+def _process_annual_efd_input(
     inventory: AnnualEFDInventory,
     output_directory: str | Path,
     *,
@@ -403,13 +563,13 @@ def process_annual_efd_input(
         )
 
         comparison_parts: list[Path] = []
-        paired_months = sorted(inventory.contributions.keys() & inventory.icms.keys())
-        for month in paired_months:
+        available_months = sorted(inventory.contributions.keys() | inventory.icms.keys())
+        for month in available_months:
             part = temp / f"comparacao-{month.month:02d}.csv"
             comparison_results.append(
                 compare_efd_files(
-                    inventory.contributions[month],
-                    inventory.icms[month],
+                    inventory.contributions.get(month),
+                    inventory.icms.get(month),
                     part,
                     delimiter=delimiter,
                 )
@@ -436,9 +596,7 @@ def process_annual_efd_input(
         inventory.cnpj,
     )
 
-    comparison_counts: Counter[str] = Counter()
-    for result in comparison_results:
-        comparison_counts.update(result.by_status)
+    comparison_rows, comparison_counts = _reconcile_other_periods(comparison_path, delimiter=delimiter)
     comparison = ComparisonResult(
         comparison_path,
         comparison_rows,
@@ -448,6 +606,7 @@ def process_annual_efd_input(
         str(inventory.year),
         str(inventory.year),
         inventory.cnpj,
+        tuple(row for result in comparison_results for row in result.coverage),
     )
 
     expected_periods = tuple(
@@ -468,6 +627,7 @@ def process_annual_efd_input(
         missing_notes_path,
         delimiter=delimiter,
     )
+    pending_path, coverage_path, pending_count = _write_review_reports(comparison, output, delimiter=delimiter)
     create_excel_workbook(output, workbook_path, delimiter=delimiter)
     return WorkflowResult(
         output,
@@ -478,4 +638,7 @@ def process_annual_efd_input(
         missing_notes_path,
         missing_notes,
         workbook_path,
+        pending_path,
+        coverage_path,
+        pending_count,
     )

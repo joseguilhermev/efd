@@ -12,7 +12,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="efd-comparar-notas",
         description=(
-            "Compara as notas C100 distintas da EFD Contribuições com a EFD ICMS/IPI."
+            "Confere documentos da EFD ICMS/IPI na EFD Contribuições e sinaliza limitações de identificação."
         ),
     )
     parser.add_argument("efd_contribuicoes", type=Path)
@@ -55,7 +55,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(
         f"Comparação criada: {result.output_path} "
-        f"({result.rows} notas distintas; {details})"
+        f"({result.icms_notes} documentos individuais no ICMS; {details})"
     )
     return 0
 

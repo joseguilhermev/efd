@@ -133,9 +133,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{result.indicators.rows} linhas de indicadores"
     )
     print(
-        f"Comparação: {result.comparison.rows} notas; "
-        f"{result.missing_notes} não lançadas na EFD Contribuições"
+        f"Conferência: {result.comparison.icms_notes} documentos individuais no ICMS; "
+        f"{result.missing_notes} não localizados na EFD Contribuições; "
+        f"{result.pending_notes} pendências de revisão"
     )
+    print(f"Pendências: {result.pending_notes_path}")
+    print(f"Cobertura dos registros: {result.coverage_path}")
     return 0
 
 

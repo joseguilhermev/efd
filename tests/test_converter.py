@@ -674,3 +674,37 @@ def test_cli_creates_csv_and_reports_scope(
     assert "Receita de venda para produto=192" in message
     assert "Receitas financeiras=0" in message
     assert "Outras receitas=35" in message
+
+
+def test_cofins_only_details_preserve_common_operation_fields(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    from efd_contribuicoes_csv.converter import SPLIT_CHILD_SPECS
+
+    pis_codes = {spec.pis_code for spec in SPLIT_CHILD_SPECS.values()}
+    source = tmp_path / "cofins-only.txt"
+    source.write_text(
+        "\n".join(
+            line for line in OTHER_PAIRS_SAMPLE.read_text().splitlines()
+            if line.split("|")[1] not in pis_codes
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "cofins.csv"
+    convert_file(source, output)
+    rows = {row["Registros"]: row for row in read_csv(output)}
+    common_fields = ("Vlr Item", "CFOP", "Natureza Crédito", "Vlr Desconto Item", "Código Serviço")
+    baseline = tmp_path / "baseline.csv"
+    convert_file(OTHER_PAIRS_SAMPLE, baseline)
+    baseline_rows = {row["Registros"]: row for row in read_csv(baseline)}
+    for spec in SPLIT_CHILD_SPECS.values():
+        row = rows[spec.records]
+        assert row["Vlr PIS"] == ""
+        assert row["Vlr Cofins"] == "7,60"
+        for column in common_fields:
+            actual = row[column]
+            expected = baseline_rows[spec.records][column]
+            if column.startswith("Vlr ") and expected:
+                assert Decimal(actual.replace(",", ".")) == Decimal(expected.replace(",", "."))
+            else:
+                assert actual == expected, (spec.records, column)

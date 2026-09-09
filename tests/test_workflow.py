@@ -52,11 +52,12 @@ def test_runs_full_flow_and_marks_missing_scope_periods(tmp_path: Path) -> None:
     zero_rows = [row for row in indicator_rows if row["Quantidade Registros"] == "0"]
 
     assert result.conversion.rows == 611
-    assert result.comparison.rows == 121
-    assert result.missing_notes == 1
+    assert result.comparison.rows == 221
+    assert result.missing_notes == 0
     assert result.workbook_path.is_file()
-    assert len(missing_notes) == 1
-    assert missing_notes[0]["Status"] == "SOMENTE_EFD_ICMS"
+    assert missing_notes == []
+    assert result.pending_notes == 1
+    assert "F550" in read_csv(result.pending_notes_path)[0]["Evidências EFD Contribuições"]
     assert tuple(scope_rows[0]) == SCOPE_COLUMNS
     assert [row["EFD Contribuições"] for row in scope_rows] == [
         "PROCESSADO",
@@ -76,6 +77,8 @@ def test_runs_full_flow_and_marks_missing_scope_periods(tmp_path: Path) -> None:
         "Indicadores",
         "Comparação",
         "Não lançadas",
+        "Pendências",
+        "Cobertura",
         "Períodos",
     ]
     analytical = workbook["Analítico"]
@@ -87,8 +90,11 @@ def test_runs_full_flow_and_marks_missing_scope_periods(tmp_path: Path) -> None:
     assert analytical.cell(2, headers["Data Documento"]).data_type == "d"
     comparison = workbook["Comparação"]
     comparison_headers = {cell.value: cell.column for cell in comparison[1]}
-    comparison_key = comparison.cell(2, comparison_headers["Chave NF-e"])
-    assert comparison_key.value == "35260899000000010001553230000200231700200236"
+    comparison_key = next(
+        row[comparison_headers["Chave NF-e"] - 1]
+        for row in comparison.iter_rows(min_row=2)
+        if row[comparison_headers["Chave NF-e"] - 1].value == "35260899000000010001553230000200231700200236"
+    )
     assert comparison_key.data_type == "s"
 
 
@@ -109,7 +115,7 @@ def test_discovers_and_processes_available_periods_for_the_whole_year(
     assert len(inventory.missing_contributions) == 11
     assert len(inventory.missing_icms) == 11
     assert result.conversion.rows == 611
-    assert result.comparison.rows == 121
+    assert result.comparison.rows == 221
     assert len(scope_rows) == 12
     assert scope_rows[7]["Status"] == "PROCESSADO"
     assert scope_rows[0]["EFD Contribuições"] == "AUSENTE"
@@ -194,7 +200,11 @@ def test_processes_available_data_when_months_do_not_have_a_pair(
     scope_rows = read_csv(result.scope_path)
 
     assert result.conversion.rows == 611
-    assert result.comparison.rows == 0
+    assert result.comparison.rows == 221
+    assert result.comparison.by_status["SEM_EFD_CONTRIBUICOES"] == 1
+    assert result.comparison.by_status["REVISAO_NECESSARIA"] == 118
+    assert result.missing_notes == 0
+    assert result.pending_notes == 221
     assert scope_rows[7]["EFD Contribuições"] == "PROCESSADO"
     assert scope_rows[7]["EFD ICMS/IPI"] == "AUSENTE"
     assert scope_rows[8]["EFD Contribuições"] == "AUSENTE"
@@ -225,3 +235,56 @@ def test_reports_year_cnpj_and_duplicate_period_inconsistencies(
     assert "mais de um ano" in message
     assert "CNPJs de raízes diferentes" in message
     assert "duplicada em 08/2026" in message
+
+
+def test_missing_notes_include_duplicates_exclusive_to_icms(tmp_path: Path) -> None:
+    source = tmp_path / "icms.txt"
+    lines = ICMS.read_text(encoding="utf-8").splitlines(keepends=True)
+    last_note = next(line for line in reversed(lines) if line.startswith("|C100|"))
+    source.write_text("".join(lines) + last_note, encoding="utf-8")
+    contribution = tmp_path / "contribution.txt"
+    contribution.write_text("\n".join(
+        line for line in CONTRIBUTION.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("|F550|")
+    ), encoding="utf-8")
+    result = process_efd_files(contribution, source, tmp_path / "resultado")
+    missing = read_csv(result.missing_notes_path)
+    assert result.missing_notes == 1
+    assert missing[0]["Status"] == "DUPLICADA_EFD_ICMS"
+    assert missing[0]["Quantidade EFD Contribuições"] == "0"
+    assert missing[0]["Quantidade EFD ICMS"] == "2"
+
+
+@pytest.mark.parametrize("annual", [False, True])
+def test_invalid_amount_preserves_previous_outputs(tmp_path: Path, annual: bool) -> None:
+    input_directory = create_annual_input(tmp_path / "entrada")
+    contribution = input_directory / "efd_contribuicoes" / "efd_08_2026.txt"
+    icms = input_directory / "efd_icms" / "efd_08_2026.txt"
+    lines = contribution.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("|A170|"):
+            fields = line.split("|")
+            fields[5] = "valor-inválido"
+            lines[index] = "|".join(fields)
+    contribution.write_text("\n".join(lines), encoding="utf-8")
+    output = tmp_path / "resultado"
+    output.mkdir()
+    previous = output / "efd_contribuicoes_analitico.csv"
+    previous.write_text("resultado anterior", encoding="utf-8")
+    with pytest.raises(ValueError, match="valor inválido"):
+        if annual:
+            process_annual_efd_input(discover_annual_efd_input(input_directory), output)
+        else:
+            process_efd_files(contribution, icms, output)
+    assert previous.read_text(encoding="utf-8") == "resultado anterior"
+    assert list(output.iterdir()) == [previous]
+
+
+def test_workflow_does_not_overwrite_input_with_report(tmp_path: Path) -> None:
+    source = tmp_path / "efd_contribuicoes_analitico.csv"
+    shutil.copyfile(CONTRIBUTION, source)
+    original = source.read_bytes()
+    with pytest.raises(ValueError, match="sobrescrever um arquivo EFD"):
+        process_efd_files(source, ICMS, tmp_path)
+    assert source.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [source]
