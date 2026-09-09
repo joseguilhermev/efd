@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -50,7 +51,8 @@ def _decimal(value: str) -> Decimal:
 
 
 def _typed_value(column: str, value: str) -> object:
-    value = value.strip()
+    # Remove apenas controles rejeitados pelo Excel; o CSV original é preservado.
+    value = ILLEGAL_CHARACTERS_RE.sub("", value).strip()
     if not value:
         return None
     if column.startswith(DATE_COLUMN_PREFIXES):
