@@ -99,7 +99,15 @@ O fluxo cria:
 - `efd_contribuicoes_indicadores.csv`;
 - `efd_comparacao_notas.csv`;
 - `efd_icms_nao_lancadas_contribuicoes.csv`;
-- `efd_periodos_escopo.csv`.
+- `efd_periodos_escopo.csv`;
+- `efd_resultado.xlsx`, com as abas `Analítico`, `Indicadores`, `Comparação`,
+  `Não lançadas` e `Períodos`.
+
+Os CSVs continuam disponíveis para integrações. Para uso direto no Excel, abra
+o arquivo `.xlsx`: CNPJ, CPF, chaves, números de documento e demais códigos são
+gravados como texto, evitando notação científica e perda de zeros ou dígitos.
+Datas e valores são gravados com tipos próprios de planilha, permitindo filtros,
+ordenação e cálculos.
 
 O controle de escopo sempre possui janeiro a dezembro. Meses sem EFD
 Contribuições aparecem como `AUSENTE` e recebem uma linha zerada para cada

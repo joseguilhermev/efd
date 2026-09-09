@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--diretorio-saida",
         type=Path,
-        help="diretório dos CSVs (padrão: <entrada>/resultado)",
+        help="diretório dos CSVs e do Excel (padrão: <entrada>/resultado)",
     )
     parser.add_argument(
         "--continuar-com-ausentes",
@@ -111,7 +111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             except EOFError:
                 answer = ""
             if answer not in {"s", "sim"}:
-                print("Processamento cancelado; nenhum CSV foi gerado ou alterado.")
+                print("Processamento cancelado; nenhuma saída foi gerada ou alterada.")
                 return 1
 
     try:
@@ -127,6 +127,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     print(f"Fluxo concluído: {result.output_directory}")
+    print(f"Excel: {result.workbook_path}")
     print(
         f"Contribuições: {result.conversion.rows} linhas analíticas; "
         f"{result.indicators.rows} linhas de indicadores"

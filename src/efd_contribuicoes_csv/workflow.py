@@ -15,6 +15,7 @@ from .comparison import (
     inspect_efd_file,
 )
 from .converter import COLUMNS, SUPPORTED_OUTPUTS, ConversionResult, convert_file
+from .excel import create_excel_workbook
 from .identifiers import cnpj_root
 from .indicators import IndicatorResult, generate_indicator_csv
 from .scope import ScopeMonth, build_scope, month_from_efd_period, validate_period_in_scope
@@ -36,6 +37,7 @@ class WorkflowResult:
     scope_path: Path
     missing_notes_path: Path
     missing_notes: int
+    workbook_path: Path
 
 
 @dataclass(frozen=True)
@@ -309,6 +311,7 @@ def process_efd_files(
     comparison_path = output / "efd_comparacao_notas.csv"
     scope_path = output / "efd_periodos_escopo.csv"
     missing_notes_path = output / "efd_icms_nao_lancadas_contribuicoes.csv"
+    workbook_path = output / "efd_resultado.xlsx"
 
     conversion = convert_file(contribution_path, analytical_path, delimiter=delimiter)
     scope = build_scope(
@@ -348,6 +351,7 @@ def process_efd_files(
         missing_notes_path,
         delimiter=delimiter,
     )
+    create_excel_workbook(output, workbook_path, delimiter=delimiter)
     return WorkflowResult(
         output,
         conversion,
@@ -356,6 +360,7 @@ def process_efd_files(
         scope_path,
         missing_notes_path,
         missing_notes,
+        workbook_path,
     )
 
 
@@ -379,6 +384,7 @@ def process_annual_efd_input(
     comparison_path = output / "efd_comparacao_notas.csv"
     scope_path = output / "efd_periodos_escopo.csv"
     missing_notes_path = output / "efd_icms_nao_lancadas_contribuicoes.csv"
+    workbook_path = output / "efd_resultado.xlsx"
 
     conversion_results: list[ConversionResult] = []
     comparison_results: list[ComparisonResult] = []
@@ -462,6 +468,7 @@ def process_annual_efd_input(
         missing_notes_path,
         delimiter=delimiter,
     )
+    create_excel_workbook(output, workbook_path, delimiter=delimiter)
     return WorkflowResult(
         output,
         conversion,
@@ -470,4 +477,5 @@ def process_annual_efd_input(
         scope_path,
         missing_notes_path,
         missing_notes,
+        workbook_path,
     )

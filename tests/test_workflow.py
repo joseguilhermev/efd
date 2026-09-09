@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from efd_contribuicoes_csv.workflow import (
     SCOPE_COLUMNS,
@@ -53,6 +54,7 @@ def test_runs_full_flow_and_marks_missing_scope_periods(tmp_path: Path) -> None:
     assert result.conversion.rows == 611
     assert result.comparison.rows == 121
     assert result.missing_notes == 1
+    assert result.workbook_path.is_file()
     assert len(missing_notes) == 1
     assert missing_notes[0]["Status"] == "SOMENTE_EFD_ICMS"
     assert tuple(scope_rows[0]) == SCOPE_COLUMNS
@@ -67,6 +69,27 @@ def test_runs_full_flow_and_marks_missing_scope_periods(tmp_path: Path) -> None:
         "01/09/2026 a 30/09/2026",
         "01/10/2026 a 31/10/2026",
     }
+
+    workbook = load_workbook(result.workbook_path, read_only=True, data_only=True)
+    assert workbook.sheetnames == [
+        "Analítico",
+        "Indicadores",
+        "Comparação",
+        "Não lançadas",
+        "Períodos",
+    ]
+    analytical = workbook["Analítico"]
+    headers = {cell.value: cell.column for cell in analytical[1]}
+    assert analytical.cell(2, headers["CNPJ"]).value == "99999999000199"
+    assert analytical.cell(2, headers["CNPJ"]).data_type == "s"
+    assert analytical.cell(2, headers["Chave NF-e"]).data_type == "s"
+    assert analytical.cell(2, headers["Vlr Documento"]).data_type == "n"
+    assert analytical.cell(2, headers["Data Documento"]).data_type == "d"
+    comparison = workbook["Comparação"]
+    comparison_headers = {cell.value: cell.column for cell in comparison[1]}
+    comparison_key = comparison.cell(2, comparison_headers["Chave NF-e"])
+    assert comparison_key.value == "35260899000000010001553230000200231700200236"
+    assert comparison_key.data_type == "s"
 
 
 def test_discovers_and_processes_available_periods_for_the_whole_year(
@@ -152,6 +175,7 @@ def test_main_can_continue_non_interactively_with_missing_months(
     assert (output / "efd_contribuicoes_indicadores.csv").is_file()
     assert (output / "efd_comparacao_notas.csv").is_file()
     assert (output / "efd_periodos_escopo.csv").is_file()
+    assert (output / "efd_resultado.xlsx").is_file()
 
 
 def test_processes_available_data_when_months_do_not_have_a_pair(

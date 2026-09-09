@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Converte EFD Contribuicoes em CSV analitico por documento e item"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "openpyxl>=3.1.5",
+]
 
 [project.scripts]
 efd-processar = "efd_contribuicoes_csv.workflow_cli:main"
