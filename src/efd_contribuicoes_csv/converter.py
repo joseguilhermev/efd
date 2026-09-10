@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cfop import cfop_details
+from .efd_input import read_efd_bytes
 from .scope import month_from_efd_period
 
 COLUMNS = (
@@ -644,7 +645,7 @@ LEVEL_THREE_PARENTS = {
 
 
 def _decode_input(path: Path) -> tuple[str, str]:
-    raw = path.read_bytes()
+    raw = read_efd_bytes(path)
     for encoding in ("utf-8-sig", "latin-1"):
         try:
             return raw.decode(encoding), encoding
@@ -672,6 +673,10 @@ def _parse_records(text: str) -> list[Record]:
                 "verifique o TXT original (possível conteúdo binário ou arquivo corrompido)."
             )
         records.append(Record(line_number, tuple(fields)))
+        if fields[0] == "9999":
+            if len(fields) != 2 or re.fullmatch(r"[0-9]+", fields[1]) is None:
+                raise EFDParseError(f"linha {line_number}: encerramento 9999 inválido")
+            break
     if not records:
         raise EFDParseError("o arquivo EFD está vazio")
     return records

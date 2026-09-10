@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .identifiers import cnpj_root
+from .efd_input import read_efd_bytes
 from .scope import month_from_efd_period
 from .document_layouts import (
     CANCELLED_PARENTS, COMPACT_A100, CONTRIBUTION_AUXILIARY, CONTRIBUTION_DOCUMENTS,
@@ -190,7 +191,7 @@ class EFDFileInfo:
 
 
 def _decode(path: Path) -> str:
-    raw = path.read_bytes()
+    raw = read_efd_bytes(path)
     for encoding in ("utf-8-sig", "latin-1"):
         try:
             return raw.decode(encoding)
@@ -220,6 +221,10 @@ def _read_file(path: Path) -> _FileData:
                 "verifique o TXT original (possível conteúdo binário ou arquivo corrompido)."
             )
         records.append(_Record(line_number, tuple(fields)))
+        if fields[0] == "9999":
+            if len(fields) != 2 or re.fullmatch(r"[0-9]+", fields[1]) is None:
+                raise EFDComparisonError(f"{path.name}, linha {line_number}: encerramento 9999 inválido")
+            break
     if not records:
         raise EFDComparisonError(f"o arquivo {path} está vazio")
 

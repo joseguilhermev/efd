@@ -241,7 +241,9 @@ def test_missing_notes_include_duplicates_exclusive_to_icms(tmp_path: Path) -> N
     source = tmp_path / "icms.txt"
     lines = ICMS.read_text(encoding="utf-8").splitlines(keepends=True)
     last_note = next(line for line in reversed(lines) if line.startswith("|C100|"))
-    source.write_text("".join(lines) + last_note, encoding="utf-8")
+    last_note_index = max(index for index, line in enumerate(lines) if line.startswith("|C100|"))
+    lines.insert(last_note_index, last_note)
+    source.write_text("".join(lines), encoding="utf-8")
     contribution = tmp_path / "contribution.txt"
     contribution.write_text("\n".join(
         line for line in CONTRIBUTION.read_text(encoding="utf-8").splitlines()
