@@ -655,7 +655,7 @@ def _decode_input(path: Path) -> tuple[str, str]:
 
 def _parse_records(text: str) -> list[Record]:
     records: list[Record] = []
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+    for line_number, raw_line in enumerate(text.split("\n"), start=1):
         line = raw_line.strip()
         if not line:
             continue
@@ -666,6 +666,11 @@ def _parse_records(text: str) -> list[Record]:
             fields = fields[:-1]
         if not fields or not fields[0].strip():
             raise EFDParseError(f"linha {line_number}: registro vazio ou malformado")
+        if re.fullmatch(r"[A-Z0-9][0-9]{3}", fields[0]) is None:
+            raise EFDParseError(
+                f"linha {line_number}: código de registro inválido; "
+                "verifique o TXT original (possível conteúdo binário ou arquivo corrompido)."
+            )
         records.append(Record(line_number, tuple(fields)))
     if not records:
         raise EFDParseError("o arquivo EFD está vazio")

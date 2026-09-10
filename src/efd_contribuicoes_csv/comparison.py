@@ -201,7 +201,7 @@ def _decode(path: Path) -> str:
 
 def _read_file(path: Path) -> _FileData:
     records: list[_Record] = []
-    for line_number, raw_line in enumerate(_decode(path).splitlines(), start=1):
+    for line_number, raw_line in enumerate(_decode(path).split("\n"), start=1):
         line = raw_line.strip()
         if not line:
             continue
@@ -213,6 +213,11 @@ def _read_file(path: Path) -> _FileData:
         if not fields or not fields[0].strip():
             raise EFDComparisonError(
                 f"{path.name}, linha {line_number}: registro vazio"
+            )
+        if re.fullmatch(r"[A-Z0-9][0-9]{3}", fields[0]) is None:
+            raise EFDComparisonError(
+                f"{path.name}, linha {line_number}: código de registro inválido; "
+                "verifique o TXT original (possível conteúdo binário ou arquivo corrompido)."
             )
         records.append(_Record(line_number, tuple(fields)))
     if not records:
